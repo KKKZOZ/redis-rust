@@ -22,6 +22,21 @@ fn main() {
 
 fn handle_connection(mut stream: TcpStream) {
     let mut buffer = [0; 512];
-    stream.read(&mut buffer).unwrap();
+    while let Ok(n) = stream.read(&mut buffer) {
+        if n == 0 {
+            break;
+        }
+        stream.write_all(b"+PONG\r\n").unwrap();
+        // let request = String::from_utf8_lossy(&buffer[..n]).into_owned();
+        // println!("request: {}", request);
+        // match request.trim().to_uppercase().as_str() {
+        //     "ping" => {
+        //         stream.write_all(b"+PONG\r\n").unwrap();
+        //     }
+        //     _ => {
+        //         stream.write_all(b"-ERR unknown command\r\n").unwrap();
+        //     }
+        // }
+    }
     stream.write_all(b"+PONG\r\n").unwrap();
 }
