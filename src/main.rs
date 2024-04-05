@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use std::collections::HashMap;
 use std::io::Write;
 use std::thread;
 use std::{
@@ -13,7 +14,8 @@ fn main() {
         match stream {
             Ok(stream) => {
                 thread::spawn(move || {
-                    handle_connection(stream);
+                    let mut store = RedisStore::new();
+                    store.handle_connection(stream);
                 });
             }
             Err(e) => {
@@ -23,26 +25,59 @@ fn main() {
     }
 }
 
-fn handle_connection(mut stream: TcpStream) {
-    let mut buffer = [0; 512];
-    while let Ok(n) = stream.read(&mut buffer) {
-        if n == 0 {
-            break;
+struct RedisStore {
+    data: HashMap<String, String>,
+}
+
+impl RedisStore {
+    fn new() -> Self {
+        RedisStore {
+            data: HashMap::new(),
         }
-        let command = Command::new(String::from_utf8_lossy(&buffer[..n]).to_string());
-        match command {
-            Ok(cmd) => match cmd {
-                Command::PING => {
-                    stream.write_all(b"+PONG\r\n").unwrap();
+    }
+
+    fn set(&mut self, key: String, value: String) {
+        self.data.insert(key, value);
+    }
+
+    fn get(&self, key: &str) -> Option<&String> {
+        self.data.get(key)
+    }
+
+    pub fn handle_connection(&mut self, mut stream: TcpStream) {
+        let mut buffer = [0; 512];
+        while let Ok(n) = stream.read(&mut buffer) {
+            if n == 0 {
+                break;
+            }
+            let command = Command::new(String::from_utf8_lossy(&buffer[..n]).to_string());
+            match command {
+                Ok(cmd) => match cmd {
+                    Command::PING => {
+                        stream.write_all(b"+PONG\r\n").unwrap();
+                    }
+                    Command::ECHO(content) => {
+                        stream
+                            .write_all(format!("+{}\r\n", content).as_bytes())
+                            .unwrap();
+                    }
+                    Command::SET(key, value) => {
+                        self.set(key, value);
+                        stream.write_all(b"+OK\r\n").unwrap();
+                    }
+                    Command::GET(key) => {
+                        if let Some(value) = self.get(&key) {
+                            stream
+                                .write_all(format!("+{}\r\n", value).as_bytes())
+                                .unwrap();
+                        } else {
+                            stream.write_all(b"$-1\r\n").unwrap();
+                        }
+                    }
+                },
+                Err(_e) => {
+                    stream.write_all(b"-ERR unknown command\r\n").unwrap();
                 }
-                Command::ECHO(content) => {
-                    stream
-                        .write_all(format!("+{}\r\n", content).as_bytes())
-                        .unwrap();
-                }
-            },
-            Err(_e) => {
-                stream.write_all(b"-ERR unknown command\r\n").unwrap();
             }
         }
     }
@@ -52,6 +87,8 @@ fn handle_connection(mut stream: TcpStream) {
 pub enum Command {
     PING,
     ECHO(String),
+    SET(String, String),
+    GET(String),
 }
 
 impl Command {
@@ -66,6 +103,8 @@ fn parse_to_cmd(arr: Vec<&str>) -> Result<Command> {
     match arr[0].to_uppercase().as_str() {
         "PING" => Ok(Command::PING),
         "ECHO" => Ok(Command::ECHO(arr[1].to_string())),
+        "SET" => Ok(Command::SET(arr[1].to_string(), arr[2].to_string())),
+        "GET" => Ok(Command::GET(arr[1].to_string())),
         _ => Err(anyhow!("unknown command")),
     }
 }
