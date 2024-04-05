@@ -1,7 +1,9 @@
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::io::Write;
+use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, SystemTime};
 use std::{
     io::Read,
     net::{TcpListener, TcpStream},
@@ -10,11 +12,13 @@ use std::{
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
 
+    let store = Arc::new(RedisStore::new());
+
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
+                let store = Arc::clone(&store);
                 thread::spawn(move || {
-                    let mut store = RedisStore::new();
                     store.handle_connection(stream);
                 });
             }
@@ -25,26 +29,48 @@ fn main() {
     }
 }
 
+struct DataItem<T: Clone> {
+    value: T,
+    ttl: Option<SystemTime>,
+}
+
+impl<T: Clone> DataItem<T> {
+    fn new(value: T, ttl: Option<SystemTime>) -> Self {
+        DataItem { value, ttl }
+    }
+    fn expired_or_return(&self) -> Option<T> {
+        if let Some(ttl) = self.ttl {
+            if ttl < SystemTime::now() {
+                return None;
+            }
+        }
+        Some(self.value.clone())
+    }
+}
+
 struct RedisStore {
-    data: HashMap<String, String>,
+    data: Mutex<HashMap<String, DataItem<String>>>,
 }
 
 impl RedisStore {
     fn new() -> Self {
         RedisStore {
-            data: HashMap::new(),
+            data: Mutex::new(HashMap::new()),
         }
     }
 
-    fn set(&mut self, key: String, value: String) {
-        self.data.insert(key, value);
+    fn set(&self, key: String, value: String, ttl: Option<SystemTime>) {
+        self.data
+            .lock()
+            .unwrap()
+            .insert(key, DataItem::new(value, ttl));
     }
 
-    fn get(&self, key: &str) -> Option<&String> {
-        self.data.get(key)
+    fn get(&self, key: &str) -> Option<String> {
+        self.data.lock().unwrap().get(key)?.expired_or_return()
     }
 
-    pub fn handle_connection(&mut self, mut stream: TcpStream) {
+    pub fn handle_connection(&self, mut stream: TcpStream) {
         let mut buffer = [0; 512];
         while let Ok(n) = stream.read(&mut buffer) {
             if n == 0 {
@@ -61,8 +87,12 @@ impl RedisStore {
                             .write_all(format!("+{}\r\n", content).as_bytes())
                             .unwrap();
                     }
-                    Command::SET(key, value) => {
-                        self.set(key, value);
+                    Command::SET(key, value, ttl) => {
+                        let ttl = match ttl {
+                            Some(ttl) => SystemTime::now().checked_add(Duration::from_millis(ttl)),
+                            None => None,
+                        };
+                        self.set(key, value, ttl);
                         stream.write_all(b"+OK\r\n").unwrap();
                     }
                     Command::GET(key) => {
@@ -87,7 +117,7 @@ impl RedisStore {
 pub enum Command {
     PING,
     ECHO(String),
-    SET(String, String),
+    SET(String, String, Option<u64>),
     GET(String),
 }
 
@@ -103,7 +133,16 @@ fn parse_to_cmd(arr: Vec<&str>) -> Result<Command> {
     match arr[0].to_uppercase().as_str() {
         "PING" => Ok(Command::PING),
         "ECHO" => Ok(Command::ECHO(arr[1].to_string())),
-        "SET" => Ok(Command::SET(arr[1].to_string(), arr[2].to_string())),
+        "SET" => {
+            let key = arr[1].to_string();
+            let value = arr[2].to_string();
+            if arr.len() == 5 && arr[3].to_uppercase() == "PX" {
+                let ttl = arr[4].parse::<u64>()?;
+                return Ok(Command::SET(key, value, Some(ttl)));
+            } else {
+                Ok(Command::SET(key, value, None))
+            }
+        }
         "GET" => Ok(Command::GET(arr[1].to_string())),
         _ => Err(anyhow!("unknown command")),
     }
