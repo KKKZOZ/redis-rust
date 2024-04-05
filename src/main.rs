@@ -1,5 +1,5 @@
-// Uncomment this block to pass the first stage
 use std::io::Write;
+use std::thread;
 use std::{
     io::Read,
     net::{TcpListener, TcpStream},
@@ -11,7 +11,9 @@ fn main() {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                handle_connection(stream);
+                thread::spawn(move || {
+                    handle_connection(stream);
+                });
             }
             Err(e) => {
                 println!("error: {}", e);
