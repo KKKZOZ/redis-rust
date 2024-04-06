@@ -7,6 +7,7 @@ pub enum Command {
     SET(String, String, Option<u64>),
     GET(String),
     INFO(String),
+    REPLCONF,
 }
 
 impl Command {
@@ -54,6 +55,7 @@ fn parse_to_cmd(arr: Vec<&str>) -> Result<Command> {
         }
         "GET" => Ok(Command::GET(arr[1].to_string())),
         "INFO" => Ok(Command::INFO(arr[1].to_string())),
+        "REPLCONF" => Ok(Command::REPLCONF),
         _ => Err(anyhow!("unknown command")),
     }
 }

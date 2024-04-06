@@ -2,7 +2,7 @@
 use std::{
     collections::HashMap,
     fmt,
-    io::{Read, Write},
+    io::Read,
     net::TcpStream,
     sync::Mutex,
     time::{Duration, SystemTime},
@@ -14,9 +14,11 @@ use crate::command::Command;
 
 use super::data_item::DataItem;
 
-mod response_writer;
+mod request_writer;
+mod response_handler;
 
-use response_writer::*;
+use request_writer::*;
+use response_handler::*;
 
 #[derive(PartialEq)]
 pub enum Role {
@@ -60,14 +62,16 @@ impl fmt::Display for ReplicationConfig {
 }
 
 pub struct RedisStore {
+    address: String,
     data: Mutex<HashMap<String, DataItem<String>>>,
     repli_config: ReplicationConfig,
     master_stream: Mutex<Option<TcpStream>>,
 }
 
 impl RedisStore {
-    pub fn new(role: Role, stream: Option<TcpStream>) -> Self {
+    pub fn new(role: Role, address: String, stream: Option<TcpStream>) -> Self {
         RedisStore {
+            address: address,
             data: Mutex::new(HashMap::new()),
             repli_config: ReplicationConfig::new(role),
             master_stream: Mutex::new(stream),
@@ -76,12 +80,15 @@ impl RedisStore {
 
     pub fn start(&self) -> Result<()> {
         if self.repli_config.role == Role::Slave {
-            self.master_stream
-                .lock()
-                .unwrap()
-                .as_mut()
-                .unwrap()
-                .write_all(b"*1\r\n$4\r\nping\r\n")?;
+            let mut master_stream = self.master_stream.lock().unwrap();
+            let stream = master_stream.as_mut().unwrap();
+            request(stream, "PING");
+            assert_eq!(read_response(stream).unwrap(), "PONG", "expect PONG");
+            let port = self.address.split(":").collect::<Vec<&str>>()[1];
+            request(stream, format!("REPLCONF listening-port {}", port).as_str());
+            assert_eq!(read_response(stream).unwrap(), "OK", "expect OK");
+            request(stream, "REPLCONF capa psync2");
+            assert_eq!(read_response(stream).unwrap(), "OK", "expect OK");
         }
         Ok(())
     }
@@ -107,21 +114,24 @@ impl RedisStore {
             match command {
                 Ok(cmd) => match cmd {
                     Command::PING => {
-                        response(&mut stream, ResponseType::SimpleString, Some("PONG"));
+                        write_response(&mut stream, ResponseType::SimpleString, Some("PONG"));
                     }
                     Command::ECHO(content) => {
-                        response(&mut stream, ResponseType::SimpleString, Some(&content));
+                        write_response(&mut stream, ResponseType::SimpleString, Some(&content));
+                    }
+                    Command::REPLCONF => {
+                        write_response(&mut stream, ResponseType::SimpleString, Some("OK"));
                     }
                     Command::INFO(section) => match section.as_str() {
                         "replication" => {
-                            response(
+                            write_response(
                                 &mut stream,
                                 ResponseType::BulkString,
                                 Some(self.repli_config.to_string().as_str()),
                             );
                         }
                         &_ => {
-                            response(
+                            write_response(
                                 &mut stream,
                                 ResponseType::SimpleError,
                                 Some("ERR unknown section"),
@@ -134,18 +144,18 @@ impl RedisStore {
                             None => None,
                         };
                         self.set(key, value, ttl);
-                        response(&mut stream, ResponseType::SimpleString, Some("OK"));
+                        write_response(&mut stream, ResponseType::SimpleString, Some("OK"));
                     }
                     Command::GET(key) => {
                         if let Some(value) = self.get(&key) {
-                            response(&mut stream, ResponseType::BulkString, Some(&value));
+                            write_response(&mut stream, ResponseType::BulkString, Some(&value));
                         } else {
-                            response(&mut stream, ResponseType::BulkString, None);
+                            write_response(&mut stream, ResponseType::BulkString, None);
                         }
                     }
                 },
                 Err(_e) => {
-                    response(
+                    write_response(
                         &mut stream,
                         ResponseType::SimpleError,
                         Some("ERR unknown command"),

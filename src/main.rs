@@ -7,6 +7,9 @@ use redis_starter_rust::redis_store::{RedisStore, Role};
 
 use clap::Parser;
 
+use tracing::info;
+use tracing_subscriber;
+
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
@@ -17,6 +20,7 @@ struct Cli {
 }
 
 fn main() {
+    tracing_subscriber::fmt::init();
     let cli = Cli::parse();
 
     let port = cli.port.unwrap_or("6379".to_string());
@@ -31,15 +35,15 @@ fn main() {
     };
 
     let address = format!("127.0.0.1:{}", port);
-    let listener = TcpListener::bind(address).unwrap();
+    let listener = TcpListener::bind(&address).unwrap();
     let master_stream = match master_address {
         Some(address) => Some(TcpStream::connect(address).unwrap()),
         _ => None,
     };
-    let store = Arc::new(RedisStore::new(role, master_stream));
+    let store = Arc::new(RedisStore::new(role, address, master_stream));
     match store.start() {
-        Ok(_) => println!("Server started on port {}", port),
-        Err(e) => println!("Error starting server: {}", e),
+        Ok(_) => info!("Server started on port {}", port),
+        Err(e) => info!("Error starting server: {}", e),
     }
 
     for stream in listener.incoming() {
