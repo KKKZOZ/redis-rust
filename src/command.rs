@@ -1,3 +1,5 @@
+use core::fmt;
+
 use anyhow::{anyhow, Ok, Result};
 
 #[derive(Debug)]
@@ -16,6 +18,26 @@ impl Command {
         let cmd_array = parse_command_array(&command)?;
         let cmd = parse_to_cmd(cmd_array)?;
         Ok(cmd)
+    }
+}
+
+impl fmt::Display for Command {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Command::PING => write!(f, "PING"),
+            Command::ECHO(content) => write!(f, "ECHO {}", content),
+            Command::SET(key, value, ttl) => {
+                if let Some(ttl) = ttl {
+                    write!(f, "SET {} {} PX {}", key, value, ttl)
+                } else {
+                    write!(f, "SET {} {}", key, value)
+                }
+            }
+            Command::GET(key) => write!(f, "GET {}", key),
+            Command::INFO(section) => write!(f, "INFO {}", section),
+            Command::REPLCONF => write!(f, "REPLCONF"),
+            Command::PSYNC(replid, offset) => write!(f, "PSYNC {} {}", replid, offset),
+        }
     }
 }
 

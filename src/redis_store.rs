@@ -69,6 +69,7 @@ pub struct RedisStore {
     data: Mutex<HashMap<String, DataItem<String>>>,
     repli_config: ReplicationConfig,
     master_stream: Mutex<Option<TcpStream>>,
+    replica_streams: Mutex<Vec<TcpStream>>,
 }
 
 impl RedisStore {
@@ -78,6 +79,7 @@ impl RedisStore {
             data: Mutex::new(HashMap::new()),
             repli_config: ReplicationConfig::new(role),
             master_stream: Mutex::new(stream),
+            replica_streams: Mutex::new(Vec::new()),
         }
     }
 
@@ -108,6 +110,14 @@ impl RedisStore {
         self.data.lock().unwrap().get(key)?.expired_or_return()
     }
 
+    fn replica_propagation(&self, cmd: Command) {
+        if self.repli_config.role == Role::Master {
+            for replica_stream in self.replica_streams.lock().unwrap().iter_mut() {
+                request(replica_stream, cmd.to_string().as_str());
+            }
+        }
+    }
+
     pub fn handle_connection(&self, mut stream: TcpStream) {
         let mut buffer = [0; 512];
         while let Ok(n) = stream.read(&mut buffer) {
@@ -136,6 +146,10 @@ impl RedisStore {
                         );
                         let empty_rdb = hex_to_bytes(EMPTY_RDB).unwrap();
                         write_response(&mut stream, RdbFile(empty_rdb.into()));
+                        self.replica_streams
+                            .lock()
+                            .unwrap()
+                            .push(stream.try_clone().unwrap());
                     }
                     Command::INFO(section) => match section.as_str() {
                         "replication" => {
@@ -153,8 +167,17 @@ impl RedisStore {
                             Some(ttl) => SystemTime::now().checked_add(Duration::from_millis(ttl)),
                             None => None,
                         };
-                        self.set(key, value, ttl);
+                        self.set(key.clone(), value.clone(), ttl);
                         write_response(&mut stream, SimpleString("OK"));
+                        self.replica_propagation(Command::SET(
+                            key,
+                            value,
+                            ttl.map(|t| {
+                                t.duration_since(SystemTime::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_millis() as u64
+                            }),
+                        ));
                     }
                     Command::GET(key) => {
                         if let Some(value) = self.get(&key) {
