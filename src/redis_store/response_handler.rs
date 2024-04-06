@@ -1,31 +1,44 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
 
+use bytes::{BufMut, Bytes, BytesMut};
 use tracing::info;
 
-pub enum ResponseType {
-    SimpleString,
-    BulkString,
-    SimpleError,
+use ResponseType::*;
+
+pub enum ResponseType<'a> {
+    SimpleString(&'a str),
+    BulkString(Option<String>),
+    SimpleError(&'a str),
+    RdbFile(Bytes),
 }
 
-pub fn write_response(stream: &mut TcpStream, response_type: ResponseType, content: Option<&str>) {
+pub fn write_response(stream: &mut TcpStream, response_type: ResponseType) {
     match response_type {
-        ResponseType::SimpleString => {
+        SimpleString(content) => {
             stream
-                .write_all(format!("+{}\r\n", content.unwrap()).as_bytes())
+                .write_all(format!("+{}\r\n", content).as_bytes())
                 .unwrap();
         }
-        ResponseType::BulkString => {
+        BulkString(content) => {
             let content = match content {
                 Some(content) => format!("${}\r\n{}\r\n", content.len(), content),
                 None => format!("$-1\r\n"),
             };
             stream.write_all(content.as_bytes()).unwrap();
         }
-        ResponseType::SimpleError => {
+        RdbFile(payload) => {
+            let mut buffer = BytesMut::new();
+            buffer.put_u8(b'$');
+            buffer.put_slice(&payload.len().to_string().as_bytes());
+            buffer.put_slice(b"\r\n");
+            buffer.put_slice(&payload);
+
+            stream.write_all(buffer.as_ref()).unwrap();
+        }
+        SimpleError(content) => {
             stream
-                .write_all(format!("-{}\r\n", content.unwrap()).as_bytes())
+                .write_all(format!("-{}\r\n", content).as_bytes())
                 .unwrap();
         }
     }

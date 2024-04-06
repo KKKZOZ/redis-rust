@@ -10,7 +10,7 @@ use std::{
 
 use anyhow::Result;
 
-use crate::command::Command;
+use crate::{command::Command, util::hex_to_bytes};
 
 use super::data_item::DataItem;
 
@@ -19,6 +19,9 @@ mod response_handler;
 
 use request_writer::*;
 use response_handler::*;
+use ResponseType::*;
+
+const EMPTY_RDB : &str = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
 
 #[derive(PartialEq)]
 pub enum Role {
@@ -115,38 +118,34 @@ impl RedisStore {
             match command {
                 Ok(cmd) => match cmd {
                     Command::PING => {
-                        write_response(&mut stream, ResponseType::SimpleString, Some("PONG"));
+                        write_response(&mut stream, SimpleString("PONG"));
                     }
                     Command::ECHO(content) => {
-                        write_response(&mut stream, ResponseType::SimpleString, Some(&content));
+                        write_response(&mut stream, SimpleString(&content));
                     }
                     Command::REPLCONF => {
-                        write_response(&mut stream, ResponseType::SimpleString, Some("OK"));
+                        write_response(&mut stream, SimpleString("OK"));
                     }
                     Command::PSYNC(_id, _offset) => {
                         write_response(
                             &mut stream,
-                            ResponseType::SimpleString,
-                            Some(
+                            SimpleString(
                                 format!("FULLRESYNC {} 0", self.repli_config.master_replid)
                                     .as_str(),
                             ),
                         );
+                        let empty_rdb = hex_to_bytes(EMPTY_RDB).unwrap();
+                        write_response(&mut stream, RdbFile(empty_rdb.into()));
                     }
                     Command::INFO(section) => match section.as_str() {
                         "replication" => {
                             write_response(
                                 &mut stream,
-                                ResponseType::BulkString,
-                                Some(self.repli_config.to_string().as_str()),
+                                BulkString(Some(self.repli_config.to_string())),
                             );
                         }
                         &_ => {
-                            write_response(
-                                &mut stream,
-                                ResponseType::SimpleError,
-                                Some("ERR unknown section"),
-                            );
+                            write_response(&mut stream, SimpleError("ERR unknown section"));
                         }
                     },
                     Command::SET(key, value, ttl) => {
@@ -155,22 +154,18 @@ impl RedisStore {
                             None => None,
                         };
                         self.set(key, value, ttl);
-                        write_response(&mut stream, ResponseType::SimpleString, Some("OK"));
+                        write_response(&mut stream, SimpleString("OK"));
                     }
                     Command::GET(key) => {
                         if let Some(value) = self.get(&key) {
-                            write_response(&mut stream, ResponseType::BulkString, Some(&value));
+                            write_response(&mut stream, BulkString(Some(value)));
                         } else {
-                            write_response(&mut stream, ResponseType::BulkString, None);
+                            write_response(&mut stream, BulkString(None));
                         }
                     }
                 },
                 Err(_e) => {
-                    write_response(
-                        &mut stream,
-                        ResponseType::SimpleError,
-                        Some("ERR unknown command"),
-                    );
+                    write_response(&mut stream, SimpleError("ERR unknown command"));
                 }
             }
         }
