@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Ok, Result};
 
 #[derive(Debug)]
 pub enum Command {
@@ -8,6 +8,7 @@ pub enum Command {
     GET(String),
     INFO(String),
     REPLCONF,
+    PSYNC(String, String),
 }
 
 impl Command {
@@ -56,6 +57,7 @@ fn parse_to_cmd(arr: Vec<&str>) -> Result<Command> {
         "GET" => Ok(Command::GET(arr[1].to_string())),
         "INFO" => Ok(Command::INFO(arr[1].to_string())),
         "REPLCONF" => Ok(Command::REPLCONF),
+        "PSYNC" => Ok(Command::PSYNC(arr[1].to_string(), arr[2].to_string())),
         _ => Err(anyhow!("unknown command")),
     }
 }

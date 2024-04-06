@@ -123,6 +123,16 @@ impl RedisStore {
                     Command::REPLCONF => {
                         write_response(&mut stream, ResponseType::SimpleString, Some("OK"));
                     }
+                    Command::PSYNC(_id, _offset) => {
+                        write_response(
+                            &mut stream,
+                            ResponseType::SimpleString,
+                            Some(
+                                format!("FULLRESYNC {} 0", self.repli_config.master_replid)
+                                    .as_str(),
+                            ),
+                        );
+                    }
                     Command::INFO(section) => match section.as_str() {
                         "replication" => {
                             write_response(
