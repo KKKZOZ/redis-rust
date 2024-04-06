@@ -1,3 +1,4 @@
+// #![allow(dead_code)]
 use std::{
     collections::HashMap, fmt, io::Read, net::TcpStream, sync::Mutex, time::Duration,
     time::SystemTime,
@@ -27,17 +28,27 @@ impl fmt::Display for Role {
 
 pub struct ReplicationConfig {
     role: Role,
+    master_replid: String,
+    master_repl_offset: u64,
 }
 
 impl ReplicationConfig {
     pub fn new(role: Role) -> Self {
-        ReplicationConfig { role }
+        ReplicationConfig {
+            role,
+            master_replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_owned(),
+            master_repl_offset: 0,
+        }
     }
 }
 
 impl fmt::Display for ReplicationConfig {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "role:{}", self.role)
+        write!(
+            f,
+            "role:{}\r\nmaster_replid:{}\r\nmaster_repl_offset:{}",
+            self.role, self.master_replid, self.master_repl_offset
+        )
     }
 }
 
