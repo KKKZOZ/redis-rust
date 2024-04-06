@@ -89,6 +89,7 @@ impl RedisStore {
             assert_eq!(read_response(stream).unwrap(), "OK", "expect OK");
             request(stream, "REPLCONF capa psync2");
             assert_eq!(read_response(stream).unwrap(), "OK", "expect OK");
+            request(stream, "PSYNC ? -1");
         }
         Ok(())
     }
