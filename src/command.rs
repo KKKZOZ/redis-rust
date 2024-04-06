@@ -17,7 +17,6 @@ impl Command {
     }
 }
 
-//*2\r\n$4\r\necho\r\n$3\r\nhey\r\n
 fn parse_command_array(command: &str) -> Result<Vec<&str>> {
     let mut iter = command.split("\r\n");
 

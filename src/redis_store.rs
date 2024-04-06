@@ -1,5 +1,6 @@
 use std::{
-    collections::HashMap, io::Read, net::TcpStream, sync::Mutex, time::Duration, time::SystemTime,
+    collections::HashMap, fmt, io::Read, net::TcpStream, sync::Mutex, time::Duration,
+    time::SystemTime,
 };
 
 use crate::command::Command;
@@ -10,14 +11,46 @@ mod response_writer;
 
 use response_writer::*;
 
+pub enum Role {
+    Master,
+    Slave,
+}
+
+impl fmt::Display for Role {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Role::Master => write!(f, "master"),
+            Role::Slave => write!(f, "slave"),
+        }
+    }
+}
+
+pub struct ReplicationConfig {
+    role: Role,
+}
+
+impl ReplicationConfig {
+    pub fn new(role: Role) -> Self {
+        ReplicationConfig { role }
+    }
+}
+
+impl fmt::Display for ReplicationConfig {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "role:{}", self.role)
+    }
+}
+
 pub struct RedisStore {
     data: Mutex<HashMap<String, DataItem<String>>>,
+    repli_config: ReplicationConfig,
 }
 
 impl RedisStore {
-    pub fn new() -> Self {
+    pub fn new(role: Role) -> Self {
         RedisStore {
             data: Mutex::new(HashMap::new()),
+            repli_config: ReplicationConfig::new(role),
         }
     }
 
@@ -47,9 +80,22 @@ impl RedisStore {
                     Command::ECHO(content) => {
                         response(&mut stream, ResponseType::SimpleString, Some(&content));
                     }
-                    Command::INFO(_section) => {
-                        response(&mut stream, ResponseType::BulkString, Some("role:master"));
-                    }
+                    Command::INFO(section) => match section.as_str() {
+                        "replication" => {
+                            response(
+                                &mut stream,
+                                ResponseType::BulkString,
+                                Some(self.repli_config.to_string().as_str()),
+                            );
+                        }
+                        &_ => {
+                            response(
+                                &mut stream,
+                                ResponseType::SimpleError,
+                                Some("ERR unknown section"),
+                            );
+                        }
+                    },
                     Command::SET(key, value, ttl) => {
                         let ttl = match ttl {
                             Some(ttl) => SystemTime::now().checked_add(Duration::from_millis(ttl)),
