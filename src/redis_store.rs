@@ -1,8 +1,14 @@
 // #![allow(dead_code)]
 use std::{
-    collections::HashMap, fmt, io::Read, net::TcpStream, sync::Mutex, time::Duration,
-    time::SystemTime,
+    collections::HashMap,
+    fmt,
+    io::{Read, Write},
+    net::TcpStream,
+    sync::Mutex,
+    time::{Duration, SystemTime},
 };
+
+use anyhow::Result;
 
 use crate::command::Command;
 
@@ -12,6 +18,7 @@ mod response_writer;
 
 use response_writer::*;
 
+#[derive(PartialEq)]
 pub enum Role {
     Master,
     Slave,
@@ -55,14 +62,28 @@ impl fmt::Display for ReplicationConfig {
 pub struct RedisStore {
     data: Mutex<HashMap<String, DataItem<String>>>,
     repli_config: ReplicationConfig,
+    master_stream: Mutex<Option<TcpStream>>,
 }
 
 impl RedisStore {
-    pub fn new(role: Role) -> Self {
+    pub fn new(role: Role, stream: Option<TcpStream>) -> Self {
         RedisStore {
             data: Mutex::new(HashMap::new()),
             repli_config: ReplicationConfig::new(role),
+            master_stream: Mutex::new(stream),
         }
+    }
+
+    pub fn start(&self) -> Result<()> {
+        if self.repli_config.role == Role::Slave {
+            self.master_stream
+                .lock()
+                .unwrap()
+                .as_mut()
+                .unwrap()
+                .write_all(b"*1\r\n$4\r\nping\r\n")?;
+        }
+        Ok(())
     }
 
     pub fn set(&self, key: String, value: String, ttl: Option<SystemTime>) {

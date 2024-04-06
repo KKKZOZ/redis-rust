@@ -1,5 +1,5 @@
 #![allow(unused_variables, unused_assignments)]
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::thread;
 
@@ -20,13 +20,11 @@ fn main() {
     let cli = Cli::parse();
 
     let port = cli.port.unwrap_or("6379".to_string());
-    let master_host: &str;
-    let master_port: &str;
+    let mut master_address = None;
 
     let role = match cli.replicaof {
         Some(replicaof) => {
-            master_host = &replicaof[0];
-            master_port = &replicaof[1];
+            master_address = Some(format!("{}:{}", replicaof[0], replicaof[1]));
             Role::Slave
         }
         None => Role::Master,
@@ -34,8 +32,15 @@ fn main() {
 
     let address = format!("127.0.0.1:{}", port);
     let listener = TcpListener::bind(address).unwrap();
-
-    let store = Arc::new(RedisStore::new(role));
+    let master_stream = match master_address {
+        Some(address) => Some(TcpStream::connect(address).unwrap()),
+        _ => None,
+    };
+    let store = Arc::new(RedisStore::new(role, master_stream));
+    match store.start() {
+        Ok(_) => println!("Server started on port {}", port),
+        Err(e) => println!("Error starting server: {}", e),
+    }
 
     for stream in listener.incoming() {
         match stream {
