@@ -1,11 +1,14 @@
 use std::{
-    collections::HashMap, io::Read, io::Write, net::TcpStream, sync::Mutex, time::Duration,
-    time::SystemTime,
+    collections::HashMap, io::Read, net::TcpStream, sync::Mutex, time::Duration, time::SystemTime,
 };
 
 use crate::command::Command;
 
 use super::data_item::DataItem;
+
+mod response_writer;
+
+use response_writer::*;
 
 pub struct RedisStore {
     data: Mutex<HashMap<String, DataItem<String>>>,
@@ -39,12 +42,13 @@ impl RedisStore {
             match command {
                 Ok(cmd) => match cmd {
                     Command::PING => {
-                        stream.write_all(b"+PONG\r\n").unwrap();
+                        response(&mut stream, ResponseType::SimpleString, Some("PONG"));
                     }
                     Command::ECHO(content) => {
-                        stream
-                            .write_all(format!("+{}\r\n", content).as_bytes())
-                            .unwrap();
+                        response(&mut stream, ResponseType::SimpleString, Some(&content));
+                    }
+                    Command::INFO(_section) => {
+                        response(&mut stream, ResponseType::BulkString, Some("role:master"));
                     }
                     Command::SET(key, value, ttl) => {
                         let ttl = match ttl {
@@ -52,20 +56,22 @@ impl RedisStore {
                             None => None,
                         };
                         self.set(key, value, ttl);
-                        stream.write_all(b"+OK\r\n").unwrap();
+                        response(&mut stream, ResponseType::SimpleString, Some("OK"));
                     }
                     Command::GET(key) => {
                         if let Some(value) = self.get(&key) {
-                            stream
-                                .write_all(format!("+{}\r\n", value).as_bytes())
-                                .unwrap();
+                            response(&mut stream, ResponseType::BulkString, Some(&value));
                         } else {
-                            stream.write_all(b"$-1\r\n").unwrap();
+                            response(&mut stream, ResponseType::BulkString, None);
                         }
                     }
                 },
                 Err(_e) => {
-                    stream.write_all(b"-ERR unknown command\r\n").unwrap();
+                    response(
+                        &mut stream,
+                        ResponseType::SimpleError,
+                        Some("ERR unknown command"),
+                    );
                 }
             }
         }
