@@ -3,7 +3,8 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::thread;
 
-use redis_starter_rust::redis_store::{RedisStore, Role};
+use redis_starter_rust::redis_store::connection::Connection;
+use redis_starter_rust::redis_store::{handle_connection, start_replicate, RedisStore, Role};
 
 use clap::Parser;
 
@@ -37,21 +38,24 @@ fn main() {
     let address = format!("127.0.0.1:{}", port);
     let listener = TcpListener::bind(&address).unwrap();
     let master_stream = match master_address {
-        Some(address) => Some(TcpStream::connect(address).unwrap()),
+        Some(address) => Some(Connection::new(TcpStream::connect(address).unwrap())),
         _ => None,
     };
-    let store = Arc::new(RedisStore::new(role, address, master_stream));
-    match store.start() {
-        Ok(_) => info!("Server started on port {}", port),
-        Err(e) => info!("Error starting server: {}", e),
+    let store = Arc::new(RedisStore::new(role, address));
+
+    if role == Role::Slave {
+        start_replicate(store.clone(), master_stream.unwrap());
     }
+
+    info!("Server started on port {}", port);
 
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
                 let store = Arc::clone(&store);
+                let conn = Connection::new(stream);
                 thread::spawn(move || {
-                    store.handle_connection(stream);
+                    handle_connection(store, conn);
                 });
             }
             Err(e) => {

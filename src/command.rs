@@ -62,7 +62,7 @@ fn parse_command_array(command: &str) -> Result<Vec<&str>> {
     }
 }
 
-fn parse_to_cmd(arr: Vec<&str>) -> Result<Command> {
+pub fn parse_to_cmd(arr: Vec<&str>) -> Result<Command> {
     match arr[0].to_uppercase().as_str() {
         "PING" => Ok(Command::PING),
         "ECHO" => Ok(Command::ECHO(arr[1].to_string())),
