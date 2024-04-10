@@ -9,7 +9,7 @@ pub enum Command {
     SET(String, String, Option<u64>),
     GET(String),
     INFO(String),
-    REPLCONF,
+    REPLCONF(Option<(String, String)>),
     PSYNC(String, String),
 }
 
@@ -35,7 +35,10 @@ impl fmt::Display for Command {
             }
             Command::GET(key) => write!(f, "GET {}", key),
             Command::INFO(section) => write!(f, "INFO {}", section),
-            Command::REPLCONF => write!(f, "REPLCONF"),
+            Command::REPLCONF(content) => match content {
+                Some((part, offset)) => write!(f, "REPLCONF {} {}", part, offset),
+                None => write!(f, "REPLCONF"),
+            },
             Command::PSYNC(replid, offset) => write!(f, "PSYNC {} {}", replid, offset),
         }
     }
@@ -78,7 +81,16 @@ pub fn parse_to_cmd(arr: Vec<&str>) -> Result<Command> {
         }
         "GET" => Ok(Command::GET(arr[1].to_string())),
         "INFO" => Ok(Command::INFO(arr[1].to_string())),
-        "REPLCONF" => Ok(Command::REPLCONF),
+        "REPLCONF" => {
+            if arr.len() == 1 {
+                Ok(Command::REPLCONF(None))
+            } else {
+                Ok(Command::REPLCONF(Some((
+                    arr[1].to_string(),
+                    arr[2].to_string(),
+                ))))
+            }
+        }
         "PSYNC" => Ok(Command::PSYNC(arr[1].to_string(), arr[2].to_string())),
         _ => Err(anyhow!("unknown command")),
     }

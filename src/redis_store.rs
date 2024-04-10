@@ -155,6 +155,9 @@ pub fn start_replicate(store: Arc<RedisStore>, mut conn: Connection) {
         let cmd = conn.read_request().unwrap();
         info!("Slave received command from Master: {}", cmd.to_string());
         match cmd {
+            Command::REPLCONF(_) => {
+                conn.write_response(RESPArray("REPLCONF ACK 0"));
+            }
             Command::SET(key, value, ttl) => {
                 let ttl = match ttl {
                     Some(ttl) => SystemTime::UNIX_EPOCH.checked_add(Duration::from_millis(ttl)),
@@ -179,7 +182,7 @@ pub fn handle_connection(store: Arc<RedisStore>, mut conn: Connection) {
             Command::ECHO(content) => {
                 conn.write_response(SimpleString(&content));
             }
-            Command::REPLCONF => {
+            Command::REPLCONF(_content) => {
                 conn.write_response(SimpleString("OK"));
             }
             Command::PSYNC(_id, _offset) => {
@@ -189,6 +192,10 @@ pub fn handle_connection(store: Arc<RedisStore>, mut conn: Connection) {
 
                 let empty_rdb = hex_to_bytes(EMPTY_RDB).unwrap();
                 conn.write_response(RdbFile(empty_rdb.into()));
+                conn.flush();
+                conn.write_request("REPLCONF GETACK *");
+                info!("GETACK * Response: {:?}", conn.read_request().unwrap());
+
                 // TODO: assume there is only one stream for a replica
                 // TODO: This connection no longer accepts new commands?
                 store.core.replicas.lock().unwrap().push(conn);

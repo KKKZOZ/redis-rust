@@ -8,6 +8,7 @@ pub enum ResponseType<'a> {
     BulkString(Option<String>),
     SimpleError(&'a str),
     RdbFile(Bytes),
+    RESPArray(&'a str),
 }
 use anyhow::Result;
 use bytes::{BufMut, Bytes, BytesMut};
@@ -27,6 +28,10 @@ impl Connection {
             reader: BufReader::new(stream),
             writer,
         }
+    }
+
+    pub fn flush(&mut self) {
+        self.writer.flush().unwrap();
     }
 
     pub fn write_request(&mut self, content: &str) {
@@ -52,6 +57,21 @@ impl Connection {
                 };
                 self.writer.write_all(content.as_bytes()).unwrap();
             }
+            RESPArray(content) => {
+                let tokens = content.split(" ").collect::<Vec<&str>>();
+                let mut buffer = BytesMut::new();
+                buffer.put_u8(b'*');
+                buffer.put_slice(&tokens.len().to_string().as_bytes());
+                buffer.put_slice(b"\r\n");
+                for token in tokens {
+                    buffer.put_u8(b'$');
+                    buffer.put_slice(&token.len().to_string().as_bytes());
+                    buffer.put_slice(b"\r\n");
+                    buffer.put_slice(token.as_bytes());
+                    buffer.put_slice(b"\r\n");
+                }
+                self.writer.write_all(buffer.as_ref()).unwrap();
+            }
             RdbFile(payload) => {
                 let mut buffer = BytesMut::new();
                 buffer.put_u8(b'$');
@@ -73,9 +93,14 @@ impl Connection {
         let mut buffer = String::new();
         self.reader.read_line(&mut buffer).unwrap();
 
-        while buffer.is_empty() {
+        if buffer == "\r\n" {
+            buffer.clear();
             self.reader.read_line(&mut buffer).unwrap();
         }
+
+        // while buffer.is_empty() {
+        //     self.reader.read_line(&mut buffer).unwrap();
+        // }
 
         let arr_len = buffer[1..2].parse::<usize>().unwrap();
 
@@ -88,7 +113,7 @@ impl Connection {
             cmd_arr.push(tokens[1].to_owned());
         }
 
-        info!("cmd_arr: {:?}", cmd_arr);
+        info!("read request: {:?}", cmd_arr);
         parse_to_cmd(cmd_arr.iter().map(AsRef::as_ref).collect())
     }
 
@@ -97,10 +122,11 @@ impl Connection {
 
         self.reader.read_line(&mut buffer).unwrap();
         if buffer == "\r\n" {
+            buffer.clear();
             self.reader.read_line(&mut buffer).unwrap();
         }
 
-        info!("buffer: {:?}", buffer);
+        info!("response buffer: {:?}", buffer);
 
         let header = buffer.chars().nth(0).unwrap();
 
@@ -117,7 +143,7 @@ impl Connection {
                 return None;
             }
         };
-
+        info!("response: {:?}", resp);
         Some(resp)
     }
 }
