@@ -192,9 +192,6 @@ pub fn handle_connection(store: Arc<RedisStore>, mut conn: Connection) {
 
                 let empty_rdb = hex_to_bytes(EMPTY_RDB).unwrap();
                 conn.write_response(RdbFile(empty_rdb.into()));
-                conn.flush();
-                conn.write_request("REPLCONF GETACK *");
-                info!("GETACK * Response: {:?}", conn.read_request().unwrap());
 
                 // TODO: assume there is only one stream for a replica
                 // TODO: This connection no longer accepts new commands?
