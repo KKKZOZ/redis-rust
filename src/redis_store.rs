@@ -66,6 +66,7 @@ impl fmt::Display for ReplicationConfig {
 pub struct Core {
     storage_engine: Arc<Mutex<HashMap<String, DataItem<String>>>>,
     replicas: Arc<Mutex<Vec<Connection>>>,
+    offset: Arc<Mutex<usize>>,
 }
 
 impl Core {
@@ -73,6 +74,7 @@ impl Core {
         Core {
             storage_engine: Arc::new(Mutex::new(HashMap::new())),
             replicas: Arc::new(Mutex::new(Vec::new())),
+            offset: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -152,11 +154,12 @@ pub fn start_replicate(store: Arc<RedisStore>, mut conn: Connection) {
     info!("Replication started");
     let store = Arc::clone(&store);
     thread::spawn(move || loop {
-        let cmd = conn.read_request().unwrap();
+        let (cmd, len) = conn.read_request().unwrap();
         info!("Slave received command from Master: {}", cmd.to_string());
         match cmd {
             Command::REPLCONF(_) => {
-                conn.write_response(RESPArray("REPLCONF ACK 0"));
+                let offset = store.core.offset.lock().unwrap();
+                conn.write_response(RESPArray(format!("REPLCONF ACK {}", offset).as_str()));
             }
             Command::SET(key, value, ttl) => {
                 let ttl = match ttl {
@@ -169,12 +172,13 @@ pub fn start_replicate(store: Arc<RedisStore>, mut conn: Connection) {
                 error!("Unexpected command from master: {}", cmd.to_string());
             }
         }
+        *store.core.offset.lock().unwrap() += len;
     });
 }
 
 pub fn handle_connection(store: Arc<RedisStore>, mut conn: Connection) {
     loop {
-        let cmd = conn.read_request().unwrap();
+        let (cmd, _) = conn.read_request().unwrap();
         match cmd {
             Command::PING => {
                 conn.write_response(SimpleString("PONG"));

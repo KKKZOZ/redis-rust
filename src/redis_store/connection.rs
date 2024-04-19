@@ -10,7 +10,7 @@ pub enum ResponseType<'a> {
     RdbFile(Bytes),
     RESPArray(&'a str),
 }
-use anyhow::Result;
+use anyhow::{Ok, Result};
 use bytes::{BufMut, Bytes, BytesMut};
 use tracing::info;
 use ResponseType::*;
@@ -89,32 +89,31 @@ impl Connection {
         }
     }
 
-    pub fn read_request(&mut self) -> Result<Command> {
+    pub fn read_request(&mut self) -> Result<(Command, usize)> {
         let mut buffer = String::new();
-        self.reader.read_line(&mut buffer).unwrap();
+        let mut len = 0;
+        len += self.reader.read_line(&mut buffer)?;
 
         if buffer == "\r\n" {
             buffer.clear();
-            self.reader.read_line(&mut buffer).unwrap();
+            len = 0;
+            len += self.reader.read_line(&mut buffer)?;
         }
 
-        // while buffer.is_empty() {
-        //     self.reader.read_line(&mut buffer).unwrap();
-        // }
-
-        let arr_len = buffer[1..2].parse::<usize>().unwrap();
+        let arr_len = buffer[1..2].parse::<usize>()?;
 
         let mut cmd_arr = vec![];
         for _ in 0..arr_len {
             let mut buf = String::new();
-            self.reader.read_line(&mut buf).unwrap();
-            self.reader.read_line(&mut buf).unwrap();
+            len += self.reader.read_line(&mut buf)?;
+            len += self.reader.read_line(&mut buf)?;
             let tokens = buf.split("\r\n").collect::<Vec<&str>>();
             cmd_arr.push(tokens[1].to_owned());
         }
 
-        info!("read request: {:?}", cmd_arr);
-        parse_to_cmd(cmd_arr.iter().map(AsRef::as_ref).collect())
+        info!("read request: {:?}  len: {}", cmd_arr, len);
+        let cmd = parse_to_cmd(cmd_arr.iter().map(AsRef::as_ref).collect())?;
+        return Ok((cmd, len));
     }
 
     pub fn read_response(&mut self) -> Option<String> {
